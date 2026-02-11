@@ -252,9 +252,9 @@ class MidiMessage:
 
 
 def get_default_uploads_dir():
-    """Find the piano-upload/uploads directory relative to this script."""
+    """Find the uploads directory relative to this script."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    potential_path = os.path.join(script_dir, "piano-upload", "uploads")
+    potential_path = os.path.join(script_dir, "uploads")
     if os.path.isdir(potential_path):
         return potential_path
     return None
