@@ -118,7 +118,8 @@ app.delete('/delete/:note/:filename', (req, res) => {
 
 // Démarrer le serveur
 const PORT = 3000;
-app.listen(PORT, () => {
-    console.log(`Serveur démarré sur http://localhost:${PORT}`);
+const HOST = '0.0.0.0';
+app.listen(PORT, HOST, () => {
+    console.log(`Serveur démarré sur http://${HOST}:${PORT}`);
 });
 
