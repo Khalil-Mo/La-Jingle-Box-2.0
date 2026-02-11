@@ -310,8 +310,11 @@ async def start_ble_server(file_manager: FileManager) -> BlessServer:
         SERVICE_UUID, FILE_LIST_UUID, char_flags, _json_bytes({}), permissions
     )
 
-    # File Transfer — Write Without Response
-    char_flags = GATTCharacteristicProperties.write_without_response
+    # File Transfer — Write (with response for reliable delivery)
+    char_flags = (
+        GATTCharacteristicProperties.write
+        | GATTCharacteristicProperties.write_without_response
+    )
     permissions = GATTAttributePermissions.writeable
     await server.add_new_characteristic(
         SERVICE_UUID, FILE_TRANSFER_UUID, char_flags, bytearray(b''), permissions
