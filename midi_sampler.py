@@ -305,6 +305,37 @@ class OledDisplay:
         except Exception:
             return "127.0.0.1"
 
+    def show_splash(self):
+        """Show splash screen with app name."""
+        img = Image.new("1", (self.WIDTH, self.HEIGHT), 0)
+        draw = ImageDraw.Draw(img)
+        try:
+            font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
+        except (IOError, OSError):
+            font_title = self.font
+        draw.text((10, 10), "La Jingle", fill=1, font=font_title)
+        draw.text((28, 30), "Box 2.0", fill=1, font=font_title)
+        self.device.display(img)
+
+    def show_progress(self, label, percent):
+        """Show a progress bar with label. percent is 0-100."""
+        img = Image.new("1", (self.WIDTH, self.HEIGHT), 0)
+        draw = ImageDraw.Draw(img)
+
+        # Label centered above bar
+        draw.text((0, 16), label, fill=1, font=self.font)
+
+        # Progress bar outline (y=38, height=12)
+        bar_x, bar_y, bar_w, bar_h = 4, 40, 120, 12
+        draw.rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], outline=1)
+
+        # Progress bar fill
+        fill_w = int(bar_w * min(percent, 100) / 100)
+        if fill_w > 0:
+            draw.rectangle([bar_x, bar_y, bar_x + fill_w, bar_y + bar_h], fill=1)
+
+        self.device.display(img)
+
     def set_status(self, status):
         """Update status line and refresh display."""
         self._status = status
@@ -491,15 +522,33 @@ def main():
     print("=" * 50)
     
     try:
-        # 1. Initialize Audio
+        # 1. Initialize OLED Display (first, so we can show splash/progress)
+        oled = None
+        if OLED_AVAILABLE and not args.no_oled:
+            try:
+                oled = OledDisplay(bus=args.i2c_bus, address=args.i2c_addr)
+                print(f"   [OK] OLED display on /dev/i2c-{args.i2c_bus} @ {hex(args.i2c_addr)}")
+                oled.show_splash()
+                time.sleep(1.5)
+            except Exception as e:
+                print(f"   [WARN] OLED not available: {e}")
+                oled = None
+        elif not OLED_AVAILABLE:
+            print("   [INFO] luma.oled not installed, OLED disabled")
+
+        # 2. Initialize Audio
+        if oled:
+            oled.show_progress("Init audio...", 20)
         if not initialize_audio():
             print("\n[ERROR] Failed to initialize audio!")
             cleanup_resources()
             sys.exit(1)
-            
-        # 2. Initialize MIDI
+
+        # 3. Initialize MIDI
+        if oled:
+            oled.show_progress("Init MIDI...", 50)
         midi_port = initialize_midi()
-        
+
         if midi_port is None:
             print("\n" + "=" * 50)
             print("[ERROR] No MIDI device available!")
@@ -512,27 +561,19 @@ def main():
             cleanup_resources()
             sys.exit(1)
 
-        # 2b. Initialize OLED Display
-        oled = None
-        if OLED_AVAILABLE and not args.no_oled:
-            try:
-                oled = OledDisplay(bus=args.i2c_bus, address=args.i2c_addr)
-                print(f"   [OK] OLED display on /dev/i2c-{args.i2c_bus} @ {hex(args.i2c_addr)}")
-            except Exception as e:
-                print(f"   [WARN] OLED not available: {e}")
-                oled = None
-        elif not OLED_AVAILABLE:
-            print("   [INFO] luma.oled not installed, OLED disabled")
-
-        # 3. Load Samples (Initial Scan)
+        # 4. Load Samples
+        if oled:
+            oled.show_progress("Loading samples...", 75)
         folder_path = get_sample_folder_path(args.dir)
         loader = SampleLoader(folder_path)
         loader.scan_and_update()  # Initial load
-        
+
         if not loader.samples:
             print("\n[WARN] No samples loaded initially!")
 
         if oled:
+            oled.show_progress("Ready!", 100)
+            time.sleep(0.5)
             oled.set_status("Ready")
 
         # 4. Main Loop
