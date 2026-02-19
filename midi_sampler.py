@@ -287,14 +287,21 @@ class OledDisplay:
         serial = i2c(port=bus, address=address)
         self.device = ssd1306(serial)
 
-        # Title font (fits in 16px yellow band)
+        # Title font: bold 16px for yellow band
         try:
             self.font_title = ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 12)
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
         except (IOError, OSError):
             self.font_title = ImageFont.load_default()
 
-        # Content font for blue area
+        # Bold font for status line
+        try:
+            self.font_bold = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14)
+        except (IOError, OSError):
+            self.font_bold = ImageFont.load_default()
+
+        # Regular font for IP and labels
         try:
             self.font = ImageFont.truetype(
                 "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
@@ -323,7 +330,7 @@ class OledDisplay:
         bbox = draw.textbbox((0, 0), text, font=self.font_title)
         tw = bbox[2] - bbox[0]
         x = (self.WIDTH - tw) // 2
-        draw.text((x, 1), text, fill=1, font=self.font_title)
+        draw.text((x, -1), text, fill=1, font=self.font_title)
 
     def _center_text(self, draw, y, text, font=None):
         """Draw text horizontally centered at given y."""
@@ -374,10 +381,10 @@ class OledDisplay:
         # Yellow zone: title
         self._draw_title(draw)
 
-        # Blue zone: IP + status, vertically centered
+        # Blue zone: IP (regular) + status (bold), vertically centered
         ip_line = f"{self._ip}:{self._web_port}"
         self._center_text(draw, self.BLUE_Y + 8, ip_line)
-        self._center_text(draw, self.BLUE_Y + 28, self._status)
+        self._center_text(draw, self.BLUE_Y + 28, self._status, font=self.font_bold)
 
         self.device.display(img)
 
