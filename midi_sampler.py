@@ -80,7 +80,7 @@ STOP_KEY_NAME = "Key1"
 
 def cleanup_resources():
     """Cleanup function to release MIDI device. Safe to call multiple times."""
-    global midi_port, _cleanup_done
+    global midi_port, _cleanup_done, oled
     
     if _cleanup_done:
         return
@@ -119,6 +119,14 @@ def cleanup_resources():
     except Exception:
         pass
     
+    # 5. Clear OLED display
+    if oled is not None:
+        try:
+            oled.clear()
+            print("   [OK] OLED cleared.")
+        except Exception:
+            pass
+
     print("[CLEANUP] Complete - MIDI device should be free now.")
 
 
@@ -440,7 +448,7 @@ class SampleLoader:
         return self.samples.get(midi_note)
 
 
-def handle_midi_message(msg, loader):
+def handle_midi_message(msg, loader, oled=None):
     """Processes incoming MIDI messages."""
     global current_channel
     
@@ -458,6 +466,9 @@ def handle_midi_message(msg, loader):
                 if current_channel and current_channel.get_busy():
                     current_channel.stop()
                 print(f"[STOP] {key_name}")
+                if oled:
+                    oled.set_now_playing(None)
+                    oled.add_log(f"[STOP] {key_name}")
                 return
 
             # PLAY COMMAND
@@ -467,8 +478,13 @@ def handle_midi_message(msg, loader):
                     current_channel.stop()
                 current_channel.play(sound)
                 print(f"[PLAY] {key_name} (Note {midi_note}, Vel: {msg.velocity})")
+                if oled:
+                    oled.set_now_playing(key_name)
+                    oled.add_log(f"[PLAY] {key_name}")
             else:
                 print(f"[SKIP] {key_name} - no sample")
+                if oled:
+                    oled.add_log(f"[SKIP] {key_name}")
         else:
             print(f"[SKIP] Note {midi_note} - not mapped")
 
@@ -536,6 +552,10 @@ def main():
         if not loader.samples:
             print("\n[WARN] No samples loaded initially!")
 
+        if oled:
+            device_name = getattr(midi_port, 'name', 'Unknown')
+            oled.set_status(midi_device=device_name, sample_count=len(loader.samples))
+
         # 4. Main Loop
         print("\n" + "=" * 50)
         print("*** READY - Waiting for MIDI input ***")
@@ -549,10 +569,11 @@ def main():
                 # Poll MIDI
                 msg = midi_port.poll()
                 if msg:
-                    handle_midi_message(msg, loader)
+                    handle_midi_message(msg, loader, oled)
                 
                 # Check for file updates
-                loader.scan_and_update()
+                if loader.scan_and_update() and oled:
+                    oled.update_sample_count(len(loader.samples))
                     
                 time.sleep(0.001)
             except Exception as e:
