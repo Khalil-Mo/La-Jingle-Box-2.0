@@ -16,6 +16,7 @@ import sys
 import time
 import argparse
 import signal
+import socket
 
 # Force unbuffered output for better debugging
 if hasattr(sys.stdout, 'reconfigure'):
@@ -270,76 +271,59 @@ class MidiMessage:
 
 
 class OledDisplay:
-    """Drives a 128x64 SSD1306 OLED over I2C."""
+    """Drives a 128x64 SSD1306 OLED over I2C.
+
+    Shows two lines:
+      - IP address + web UI port
+      - Current status (Ready / Playing KeyX)
+    """
 
     WIDTH = 128
     HEIGHT = 64
-    LOG_MAX_LINES = 3
 
-    def __init__(self, bus=2, address=0x3C):
+    def __init__(self, bus=2, address=0x3C, web_port=3000):
         serial = i2c(port=bus, address=address)
         self.device = ssd1306(serial)
-        self.font_small = ImageFont.load_default()
         try:
-            self.font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
+            self.font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
         except (IOError, OSError):
-            self.font_large = self.font_small
+            self.font = ImageFont.load_default()
 
-        self._midi_device = ""
-        self._sample_count = 0
-        self._now_playing = None
-        self._log_lines = []
+        self._ip = self._get_ip()
+        self._web_port = web_port
+        self._status = "Ready"
 
-    def set_status(self, midi_device="", sample_count=0):
-        """Update persistent status fields."""
-        self._midi_device = midi_device[:20]
-        self._sample_count = sample_count
-        self._render()
+    @staticmethod
+    def _get_ip():
+        """Get the local IP address."""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "127.0.0.1"
 
-    def set_now_playing(self, key_name=None):
-        """Update now-playing indicator. None means idle."""
-        self._now_playing = key_name
-        self._render()
-
-    def add_log(self, line):
-        """Append a log line (keeps last LOG_MAX_LINES)."""
-        self._log_lines.append(line[:26])
-        self._log_lines = self._log_lines[-self.LOG_MAX_LINES:]
-        self._render()
-
-    def update_sample_count(self, count):
-        """Update sample count without full status refresh."""
-        self._sample_count = count
+    def set_status(self, status):
+        """Update status line and refresh display."""
+        self._status = status
         self._render()
 
     def _render(self):
-        """Redraw the full display."""
+        """Redraw the display: IP line + status line."""
         img = Image.new("1", (self.WIDTH, self.HEIGHT), 0)
         draw = ImageDraw.Draw(img)
 
-        # --- Top: status (2 lines, y=0 and y=10) ---
-        title = f"Jingle Box  {self._sample_count} smp"
-        draw.text((0, 0), title, fill=1, font=self.font_small)
-
-        if self._midi_device:
-            draw.text((0, 10), self._midi_device, fill=1, font=self.font_small)
+        # Line 1: IP address + port (top half)
+        ip_line = f"{self._ip}:{self._web_port}"
+        draw.text((0, 8), ip_line, fill=1, font=self.font)
 
         # Separator
-        draw.line([(0, 21), (self.WIDTH, 21)], fill=1)
+        draw.line([(0, 30), (self.WIDTH, 30)], fill=1)
 
-        # --- Middle: now playing (y=24) ---
-        if self._now_playing:
-            label = f"> {self._now_playing}"
-        else:
-            label = "Ready"
-        draw.text((4, 24), label, fill=1, font=self.font_large)
-
-        # Separator
-        draw.line([(0, 42), (self.WIDTH, 42)], fill=1)
-
-        # --- Bottom: log lines (y=44, 51, 58 — 3 lines of 7px) ---
-        for idx, line in enumerate(self._log_lines):
-            draw.text((0, 44 + idx * 7), line, fill=1, font=self.font_small)
+        # Line 2: Status (bottom half)
+        draw.text((0, 38), self._status, fill=1, font=self.font)
 
         self.device.display(img)
 
@@ -467,8 +451,7 @@ def handle_midi_message(msg, loader, oled=None):
                     current_channel.stop()
                 print(f"[STOP] {key_name}")
                 if oled:
-                    oled.set_now_playing(None)
-                    oled.add_log(f"[STOP] {key_name}")
+                    oled.set_status("Ready")
                 return
 
             # PLAY COMMAND
@@ -479,12 +462,9 @@ def handle_midi_message(msg, loader, oled=None):
                 current_channel.play(sound)
                 print(f"[PLAY] {key_name} (Note {midi_note}, Vel: {msg.velocity})")
                 if oled:
-                    oled.set_now_playing(key_name)
-                    oled.add_log(f"[PLAY] {key_name}")
+                    oled.set_status(f"Playing {key_name}")
             else:
                 print(f"[SKIP] {key_name} - no sample")
-                if oled:
-                    oled.add_log(f"[SKIP] {key_name}")
         else:
             print(f"[SKIP] Note {midi_note} - not mapped")
 
@@ -553,8 +533,7 @@ def main():
             print("\n[WARN] No samples loaded initially!")
 
         if oled:
-            device_name = getattr(midi_port, 'name', 'Unknown')
-            oled.set_status(midi_device=device_name, sample_count=len(loader.samples))
+            oled.set_status("Ready")
 
         # 4. Main Loop
         print("\n" + "=" * 50)
@@ -572,8 +551,7 @@ def main():
                     handle_midi_message(msg, loader, oled)
                 
                 # Check for file updates
-                if loader.scan_and_update() and oled:
-                    oled.update_sample_count(len(loader.samples))
+                loader.scan_and_update()
                     
                 time.sleep(0.001)
             except Exception as e:
