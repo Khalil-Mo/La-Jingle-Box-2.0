@@ -35,11 +35,21 @@ except ImportError:
     print("Error: The 'pygame' library is required. Please install it with 'pip install pygame'.")
     sys.exit(1)
 
+# OLED Display (optional)
+try:
+    from luma.core.interface.serial import i2c
+    from luma.oled.device import ssd1306
+    from PIL import Image, ImageDraw, ImageFont
+    OLED_AVAILABLE = True
+except ImportError:
+    OLED_AVAILABLE = False
+
 
 # --- Global State ---
 current_channel = None 
 midi_port = None  # Global reference for cleanup
 _cleanup_done = False  # Prevent double cleanup
+oled = None  # Global reference for OLED display
 
 # --- Constants ---
 SUPPORTED_EXTENSIONS = ('.wav', '.mp3')
@@ -244,11 +254,93 @@ class PygameMidiWrapper:
 
 class MidiMessage:
     """Simple MIDI message class compatible with mido messages."""
-    
+
     def __init__(self, msg_type, **kwargs):
         self.type = msg_type
         for key, value in kwargs.items():
             setattr(self, key, value)
+
+
+class OledDisplay:
+    """Drives a 128x64 SSD1306 OLED over I2C."""
+
+    WIDTH = 128
+    HEIGHT = 64
+    LOG_MAX_LINES = 3
+
+    def __init__(self, bus=2, address=0x3C):
+        serial = i2c(port=bus, address=address)
+        self.device = ssd1306(serial)
+        self.font_small = ImageFont.load_default()
+        try:
+            self.font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
+        except (IOError, OSError):
+            self.font_large = self.font_small
+
+        self._midi_device = ""
+        self._sample_count = 0
+        self._now_playing = None
+        self._log_lines = []
+
+    def set_status(self, midi_device="", sample_count=0):
+        """Update persistent status fields."""
+        self._midi_device = midi_device[:20]
+        self._sample_count = sample_count
+        self._render()
+
+    def set_now_playing(self, key_name=None):
+        """Update now-playing indicator. None means idle."""
+        self._now_playing = key_name
+        self._render()
+
+    def add_log(self, line):
+        """Append a log line (keeps last LOG_MAX_LINES)."""
+        self._log_lines.append(line[:26])
+        self._log_lines = self._log_lines[-self.LOG_MAX_LINES:]
+        self._render()
+
+    def update_sample_count(self, count):
+        """Update sample count without full status refresh."""
+        self._sample_count = count
+        self._render()
+
+    def _render(self):
+        """Redraw the full display."""
+        img = Image.new("1", (self.WIDTH, self.HEIGHT), 0)
+        draw = ImageDraw.Draw(img)
+
+        # --- Top: status (2 lines, y=0 and y=10) ---
+        title = f"Jingle Box  {self._sample_count} smp"
+        draw.text((0, 0), title, fill=1, font=self.font_small)
+
+        if self._midi_device:
+            draw.text((0, 10), self._midi_device, fill=1, font=self.font_small)
+
+        # Separator
+        draw.line([(0, 21), (self.WIDTH, 21)], fill=1)
+
+        # --- Middle: now playing (y=24) ---
+        if self._now_playing:
+            label = f"> {self._now_playing}"
+        else:
+            label = "Ready"
+        draw.text((4, 24), label, fill=1, font=self.font_large)
+
+        # Separator
+        draw.line([(0, 42), (self.WIDTH, 42)], fill=1)
+
+        # --- Bottom: log lines (y=44, 51, 58 — 3 lines of 7px) ---
+        for idx, line in enumerate(self._log_lines):
+            draw.text((0, 44 + idx * 7), line, fill=1, font=self.font_small)
+
+        self.device.display(img)
+
+    def clear(self):
+        """Turn off the display."""
+        try:
+            self.device.hide()
+        except Exception:
+            pass
 
 
 def get_default_uploads_dir():
@@ -390,6 +482,12 @@ def main():
     
     parser = argparse.ArgumentParser(description="MIDI Sampler for Piano Player")
     parser.add_argument("--dir", help="Path to uploads directory", default=None)
+    parser.add_argument("--i2c-bus", type=int, default=2,
+                        help="I2C bus number for OLED display (default: 2)")
+    parser.add_argument("--i2c-addr", type=lambda x: int(x, 0), default=0x3C,
+                        help="I2C address for OLED display (default: 0x3C)")
+    parser.add_argument("--no-oled", action="store_true",
+                        help="Disable OLED display")
     args = parser.parse_args()
 
     print("=" * 50)
@@ -417,7 +515,19 @@ def main():
             print("4. Unplug/replug MIDI device")
             cleanup_resources()
             sys.exit(1)
-        
+
+        # 2b. Initialize OLED Display
+        oled = None
+        if OLED_AVAILABLE and not args.no_oled:
+            try:
+                oled = OledDisplay(bus=args.i2c_bus, address=args.i2c_addr)
+                print(f"   [OK] OLED display on /dev/i2c-{args.i2c_bus} @ {hex(args.i2c_addr)}")
+            except Exception as e:
+                print(f"   [WARN] OLED not available: {e}")
+                oled = None
+        elif not OLED_AVAILABLE:
+            print("   [INFO] luma.oled not installed, OLED disabled")
+
         # 3. Load Samples (Initial Scan)
         folder_path = get_sample_folder_path(args.dir)
         loader = SampleLoader(folder_path)
