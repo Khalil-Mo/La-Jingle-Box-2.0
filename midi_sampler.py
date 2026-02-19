@@ -283,30 +283,43 @@ class OledDisplay:
     YELLOW_H = 16  # top yellow zone
     BLUE_Y = 16    # blue zone starts here
 
+    # Common font search paths across Linux distros
+    _BOLD_FONTS = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+    ]
+    _REGULAR_FONTS = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    ]
+
+    @staticmethod
+    def _load_font(paths, size):
+        """Try each font path, fall back to Pillow default at given size."""
+        for path in paths:
+            try:
+                return ImageFont.truetype(path, size)
+            except (IOError, OSError):
+                continue
+        # Pillow >= 10.0 supports sized default
+        try:
+            return ImageFont.load_default(size=size)
+        except TypeError:
+            return ImageFont.load_default()
+
     def __init__(self, bus=2, address=0x3C, web_port=3000):
         serial = i2c(port=bus, address=address)
         self.device = ssd1306(serial)
 
-        # Title font: bold 16px for yellow band
-        try:
-            self.font_title = ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
-        except (IOError, OSError):
-            self.font_title = ImageFont.load_default()
-
-        # Bold font for status line
-        try:
-            self.font_bold = ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14)
-        except (IOError, OSError):
-            self.font_bold = ImageFont.load_default()
-
-        # Regular font for IP and labels
-        try:
-            self.font = ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
-        except (IOError, OSError):
-            self.font = ImageFont.load_default()
+        self.font_title = self._load_font(self._BOLD_FONTS, 16)
+        self.font_bold = self._load_font(self._BOLD_FONTS, 14)
+        self.font = self._load_font(self._REGULAR_FONTS, 14)
 
         self._ip = self._get_ip()
         self._web_port = web_port
