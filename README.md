@@ -19,6 +19,21 @@ pip install pygame mido
 cd piano-upload && npm install
 ```
 
+### Optional: OLED Display
+
+For I2C OLED display support (SSD1306, 128x64):
+
+```bash
+pip install luma.oled
+```
+
+### OLED CLI Options
+
+```bash
+python midi_sampler.py --i2c-bus 2 --i2c-addr 0x3C   # specify bus/address
+python midi_sampler.py --no-oled                       # disable OLED
+```
+
 ## Quick Start
 
 ```bash
