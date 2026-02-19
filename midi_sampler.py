@@ -47,10 +47,11 @@ except ImportError:
 
 
 # --- Global State ---
-current_channel = None 
+current_channel = None
 midi_port = None  # Global reference for cleanup
 _cleanup_done = False  # Prevent double cleanup
 oled = None  # Global reference for OLED display
+amp_pin = None  # GPIO pin number for amplifier enable (None = disabled)
 
 # --- Constants ---
 SUPPORTED_EXTENSIONS = ('.wav', '.mp3')
@@ -78,18 +79,57 @@ NOTE_MAPPING = {
 NOTE_TO_KEY = {v: k for k, v in NOTE_MAPPING.items()}
 STOP_KEY_NAME = "Key1"
 
+# Default GPIO for amplifier SD pin: PC9 = (2 * 32) + 9 = 73
+DEFAULT_AMP_GPIO = 73
+
+
+def gpio_export(pin):
+    """Export a GPIO pin via sysfs and configure as output LOW."""
+    try:
+        with open("/sys/class/gpio/export", "w") as f:
+            f.write(str(pin))
+    except OSError:
+        pass  # already exported
+    with open(f"/sys/class/gpio/gpio{pin}/direction", "w") as f:
+        f.write("out")
+    with open(f"/sys/class/gpio/gpio{pin}/value", "w") as f:
+        f.write("0")
+
+
+def gpio_set(pin, value):
+    """Set a GPIO pin HIGH (1) or LOW (0)."""
+    with open(f"/sys/class/gpio/gpio{pin}/value", "w") as f:
+        f.write(str(value))
+
+
+def gpio_unexport(pin):
+    """Unexport a GPIO pin."""
+    try:
+        with open("/sys/class/gpio/unexport", "w") as f:
+            f.write(str(pin))
+    except OSError:
+        pass
+
 
 def cleanup_resources():
     """Cleanup function to release MIDI device. Safe to call multiple times."""
-    global midi_port, _cleanup_done, oled
-    
+    global midi_port, _cleanup_done, oled, amp_pin
+
     if _cleanup_done:
         return
     _cleanup_done = True
-    
+
     print("\n[CLEANUP] Releasing resources...")
-    
-    # 1. Close MIDI port FIRST (most important)
+
+    # 1. Disable amplifier FIRST (before audio shutdown to avoid pop)
+    if amp_pin is not None:
+        try:
+            gpio_set(amp_pin, 0)
+            print("   [OK] Amplifier disabled.")
+        except Exception:
+            pass
+
+    # 2. Close MIDI port
     if midi_port is not None:
         try:
             midi_port.close()
@@ -97,30 +137,39 @@ def cleanup_resources():
         except Exception as e:
             print(f"   [WARN] MIDI port close error: {e}")
         midi_port = None
-    
-    # 2. Quit pygame.midi
+
+    # 3. Quit pygame.midi
     try:
         if pygame.midi.get_init():
             pygame.midi.quit()
             print("   [OK] pygame.midi released.")
     except Exception:
         pass
-    
-    # 3. Quit pygame.mixer  
+
+    # 4. Quit pygame.mixer
     try:
         if pygame.mixer.get_init():
             pygame.mixer.quit()
             print("   [OK] pygame.mixer released.")
     except Exception:
         pass
-    
-    # 4. Full pygame quit
+
+    # 5. Full pygame quit
     try:
         pygame.quit()
     except Exception:
         pass
-    
-    # 5. Clear OLED display
+
+    # 6. Release amplifier GPIO
+    if amp_pin is not None:
+        try:
+            gpio_unexport(amp_pin)
+            print("   [OK] Amplifier GPIO released.")
+        except Exception:
+            pass
+        amp_pin = None
+
+    # 7. Clear OLED display
     if oled is not None:
         try:
             oled.clear()
@@ -545,8 +594,8 @@ def handle_midi_message(msg, loader, oled=None):
 
 def main():
     """Main function to run the MIDI sampler."""
-    global midi_port
-    
+    global midi_port, amp_pin
+
     # Setup signal handlers FIRST
     setup_signal_handlers()
     
@@ -558,6 +607,10 @@ def main():
                         help="I2C address for OLED display (default: 0x3C)")
     parser.add_argument("--no-oled", action="store_true",
                         help="Disable OLED display")
+    parser.add_argument("--amp-pin", type=int, default=DEFAULT_AMP_GPIO,
+                        help=f"GPIO pin for amplifier enable/SD (default: {DEFAULT_AMP_GPIO} = PC9)")
+    parser.add_argument("--no-amp", action="store_true",
+                        help="Disable amplifier GPIO control")
     args = parser.parse_args()
 
     print("=" * 50)
@@ -579,13 +632,29 @@ def main():
         elif not OLED_AVAILABLE:
             print("   [INFO] luma.oled not installed, OLED disabled")
 
-        # 2. Initialize Audio
+        # 2. Setup amplifier GPIO (keep disabled during audio init)
+        if not args.no_amp:
+            try:
+                gpio_export(args.amp_pin)
+                amp_pin = args.amp_pin
+                print(f"   [OK] Amplifier GPIO {amp_pin} ready (disabled)")
+            except Exception as e:
+                print(f"   [WARN] Amplifier GPIO not available: {e}")
+                amp_pin = None
+
+        # 3. Initialize Audio
         if oled:
             oled.show_progress("Init audio...", 20)
         if not initialize_audio():
             print("\n[ERROR] Failed to initialize audio!")
             cleanup_resources()
             sys.exit(1)
+
+        # Enable amplifier now that audio is settled
+        if amp_pin is not None:
+            time.sleep(0.1)  # brief settle time
+            gpio_set(amp_pin, 1)
+            print("   [OK] Amplifier enabled.")
 
         # 3. Initialize MIDI
         if oled:
