@@ -271,21 +271,33 @@ class MidiMessage:
 
 
 class OledDisplay:
-    """Drives a 128x64 SSD1306 OLED over I2C.
+    """Drives a 128x64 dual-color SSD1306 OLED over I2C.
 
-    Shows two lines:
-      - IP address + web UI port
-      - Current status (Ready / Playing KeyX)
+    Display zones:
+      - Yellow area: top 16 pixels  → always shows "CarlBox v2"
+      - Blue area:   bottom 48 pixels → progress bar or IP + status
     """
 
     WIDTH = 128
     HEIGHT = 64
+    YELLOW_H = 16  # top yellow zone
+    BLUE_Y = 16    # blue zone starts here
 
     def __init__(self, bus=2, address=0x3C, web_port=3000):
         serial = i2c(port=bus, address=address)
         self.device = ssd1306(serial)
+
+        # Title font (fits in 16px yellow band)
         try:
-            self.font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
+            self.font_title = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 12)
+        except (IOError, OSError):
+            self.font_title = ImageFont.load_default()
+
+        # Content font for blue area
+        try:
+            self.font = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
         except (IOError, OSError):
             self.font = ImageFont.load_default()
 
@@ -305,31 +317,44 @@ class OledDisplay:
         except Exception:
             return "127.0.0.1"
 
+    def _draw_title(self, draw):
+        """Draw 'CarlBox v2' centered in the yellow zone (top 16px)."""
+        text = "CarlBox v2"
+        bbox = draw.textbbox((0, 0), text, font=self.font_title)
+        tw = bbox[2] - bbox[0]
+        x = (self.WIDTH - tw) // 2
+        draw.text((x, 1), text, fill=1, font=self.font_title)
+
+    def _center_text(self, draw, y, text, font=None):
+        """Draw text horizontally centered at given y."""
+        font = font or self.font
+        bbox = draw.textbbox((0, 0), text, font=font)
+        tw = bbox[2] - bbox[0]
+        x = (self.WIDTH - tw) // 2
+        draw.text((x, y), text, fill=1, font=font)
+
     def show_splash(self):
-        """Show splash screen with app name."""
+        """Show splash: title in yellow, empty blue area."""
         img = Image.new("1", (self.WIDTH, self.HEIGHT), 0)
         draw = ImageDraw.Draw(img)
-        try:
-            font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
-        except (IOError, OSError):
-            font_title = self.font
-        draw.text((10, 10), "La Jingle", fill=1, font=font_title)
-        draw.text((28, 30), "Box 2.0", fill=1, font=font_title)
+        self._draw_title(draw)
         self.device.display(img)
 
     def show_progress(self, label, percent):
-        """Show a progress bar with label. percent is 0-100."""
+        """Show title + progress bar with label in blue area."""
         img = Image.new("1", (self.WIDTH, self.HEIGHT), 0)
         draw = ImageDraw.Draw(img)
 
-        # Label centered above bar
-        draw.text((0, 16), label, fill=1, font=self.font)
+        # Yellow zone: title
+        self._draw_title(draw)
 
-        # Progress bar outline (y=38, height=12)
-        bar_x, bar_y, bar_w, bar_h = 4, 40, 120, 12
+        # Blue zone: label + progress bar
+        self._center_text(draw, self.BLUE_Y + 4, label)
+
+        bar_x, bar_w, bar_h = 4, 120, 10
+        bar_y = self.BLUE_Y + 26
         draw.rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], outline=1)
 
-        # Progress bar fill
         fill_w = int(bar_w * min(percent, 100) / 100)
         if fill_w > 0:
             draw.rectangle([bar_x, bar_y, bar_x + fill_w, bar_y + bar_h], fill=1)
@@ -342,19 +367,17 @@ class OledDisplay:
         self._render()
 
     def _render(self):
-        """Redraw the display: IP line + status line."""
+        """Redraw: title in yellow, IP + status centered in blue."""
         img = Image.new("1", (self.WIDTH, self.HEIGHT), 0)
         draw = ImageDraw.Draw(img)
 
-        # Line 1: IP address + port (top half)
+        # Yellow zone: title
+        self._draw_title(draw)
+
+        # Blue zone: IP + status, vertically centered
         ip_line = f"{self._ip}:{self._web_port}"
-        draw.text((0, 8), ip_line, fill=1, font=self.font)
-
-        # Separator
-        draw.line([(0, 30), (self.WIDTH, 30)], fill=1)
-
-        # Line 2: Status (bottom half)
-        draw.text((0, 38), self._status, fill=1, font=self.font)
+        self._center_text(draw, self.BLUE_Y + 8, ip_line)
+        self._center_text(draw, self.BLUE_Y + 28, self._status)
 
         self.device.display(img)
 
