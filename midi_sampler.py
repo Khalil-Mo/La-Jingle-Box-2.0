@@ -486,7 +486,7 @@ def get_sample_folder_path(args_path=None):
 
 class SampleLoader:
     """Handles loading and hot-reloading of samples."""
-    
+
     def __init__(self, folder_path):
         self.folder_path = folder_path
         self.samples = {}  # {midi_note: pygame.mixer.Sound}
@@ -494,42 +494,59 @@ class SampleLoader:
         self._last_scan_time = 0
         self.scan_interval = 2.0  # Seconds between scans
 
-    def scan_and_update(self):
-        """Scans directories and updates samples if changes detected."""
-        current_time = time.time()
-        if current_time - self._last_scan_time < self.scan_interval:
-            return False
-            
-        self._last_scan_time = current_time
-        changes_detected = False
-
-        for key_folder, midi_note in NOTE_MAPPING.items():
+    def count_samples(self):
+        """Count how many sample files exist (fast scan, no loading)."""
+        count = 0
+        for key_folder in NOTE_MAPPING:
             target_dir = os.path.join(self.folder_path, key_folder)
-            
-            # Find the valid audio file
-            current_file = None
-            current_mtime = 0
-            
             if os.path.isdir(target_dir):
                 try:
-                    # Get all valid files with stats
-                    valid_files = []
                     for f in os.listdir(target_dir):
                         if f.lower().endswith(SUPPORTED_EXTENSIONS):
-                            full_path = os.path.join(target_dir, f)
-                            valid_files.append((full_path, os.path.getmtime(full_path)))
-                    
-                    # Sort to ensure deterministic selection (e.g. alphabetical)
-                    valid_files.sort(key=lambda x: x[0])
-                    
-                    if valid_files:
-                        current_file, current_mtime = valid_files[0]
+                            count += 1
+                            break  # one sample per key
                 except OSError:
                     pass
+        return count
 
-            # Check if we need to update
+    def _find_sample_file(self, key_folder):
+        """Find the audio file for a key folder. Returns (path, mtime) or (None, 0)."""
+        target_dir = os.path.join(self.folder_path, key_folder)
+        if not os.path.isdir(target_dir):
+            return None, 0
+        try:
+            valid_files = []
+            for f in os.listdir(target_dir):
+                if f.lower().endswith(SUPPORTED_EXTENSIONS):
+                    full_path = os.path.join(target_dir, f)
+                    valid_files.append((full_path, os.path.getmtime(full_path)))
+            valid_files.sort(key=lambda x: x[0])
+            if valid_files:
+                return valid_files[0]
+        except OSError:
+            pass
+        return None, 0
+
+    def scan_and_update(self, on_progress=None):
+        """Scans directories and updates samples if changes detected.
+
+        Args:
+            on_progress: optional callback(loaded_index, total) called after
+                         each key is processed. Only used during initial load.
+        """
+        current_time = time.time()
+        if on_progress is None and current_time - self._last_scan_time < self.scan_interval:
+            return False
+
+        self._last_scan_time = current_time
+        changes_detected = False
+        items = list(NOTE_MAPPING.items())
+        total = len(items)
+
+        for idx, (key_folder, midi_note) in enumerate(items):
+            current_file, current_mtime = self._find_sample_file(key_folder)
             cached_info = self._file_cache.get(midi_note)
-            
+
             # Case 1: New file or file changed
             if current_file:
                 if (not cached_info) or (cached_info[0] != current_file) or (cached_info[1] != current_mtime):
@@ -541,13 +558,16 @@ class SampleLoader:
                         changes_detected = True
                     except (pygame.error, OSError) as e:
                         print(f"[ERROR] Failed to load {current_file}: {e}")
-            
+
             # Case 2: File removed
             elif cached_info:
                 print(f"[REMOVE] Unloaded sample for {key_folder}")
                 self.samples.pop(midi_note, None)
                 self._file_cache.pop(midi_note, None)
                 changes_detected = True
+
+            if on_progress:
+                on_progress(idx + 1, total)
 
         return changes_detected
 
@@ -633,6 +653,8 @@ def main():
             print("   [INFO] luma.oled not installed, OLED disabled")
 
         # 2. Setup amplifier GPIO (keep disabled during audio init)
+        if oled:
+            oled.show_progress("Init hardware...", 5)
         if not args.no_amp:
             try:
                 gpio_export(args.amp_pin)
@@ -644,7 +666,7 @@ def main():
 
         # 3. Initialize Audio
         if oled:
-            oled.show_progress("Init audio...", 20)
+            oled.show_progress("Init audio...", 8)
         if not initialize_audio():
             print("\n[ERROR] Failed to initialize audio!")
             cleanup_resources()
@@ -656,9 +678,9 @@ def main():
             gpio_set(amp_pin, 1)
             print("   [OK] Amplifier enabled.")
 
-        # 3. Initialize MIDI
+        # 4. Initialize MIDI
         if oled:
-            oled.show_progress("Init MIDI...", 50)
+            oled.show_progress("Init MIDI...", 12)
         midi_port = initialize_midi()
 
         if midi_port is None:
@@ -673,12 +695,18 @@ def main():
             cleanup_resources()
             sys.exit(1)
 
-        # 4. Load Samples
+        # 5. Load Samples (15% to 100% of progress bar)
         if oled:
-            oled.show_progress("Loading samples...", 75)
+            oled.show_progress("Loading samples...", 15)
         folder_path = get_sample_folder_path(args.dir)
         loader = SampleLoader(folder_path)
-        loader.scan_and_update()  # Initial load
+
+        def _on_sample_progress(loaded, total):
+            if oled:
+                pct = 15 + int(85 * loaded / total)
+                oled.show_progress(f"Loading samples {loaded}/{total}", pct)
+
+        loader.scan_and_update(on_progress=_on_sample_progress)
 
         if not loader.samples:
             print("\n[WARN] No samples loaded initially!")
