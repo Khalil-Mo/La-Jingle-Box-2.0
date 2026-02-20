@@ -1,0 +1,15 @@
+[Unit]
+Description=CarlBox MIDI Sampler
+After=network.target sound.target
+
+[Service]
+Type=simple
+WorkingDirectory=/usr/src/carlbox-sampler
+ExecStart=/usr/src/carlbox-sampler/venv/bin/python midi_sampler.py
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
