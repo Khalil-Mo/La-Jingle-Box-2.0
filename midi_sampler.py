@@ -704,7 +704,7 @@ def main():
         def _on_sample_progress(loaded, total):
             if oled:
                 pct = 15 + int(85 * loaded / total)
-                oled.show_progress(f"Loading samples {loaded}/{total}", pct)
+                oled.show_progress(f"Loading {loaded}/{total}", pct)
 
         loader.scan_and_update(on_progress=_on_sample_progress)
 
