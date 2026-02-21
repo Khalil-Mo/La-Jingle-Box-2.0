@@ -13,7 +13,7 @@ import subprocess
 import webbrowser
 
 # --- Configuration ---
-WEB_SERVER_PORT = 3000
+WEB_SERVER_PORT = 80
 WEB_SERVER_STARTUP_DELAY = 2  # Seconds to wait for server to start
 
 # Global reference for cleanup

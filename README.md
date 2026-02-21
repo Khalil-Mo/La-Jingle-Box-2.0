@@ -226,7 +226,7 @@ python midi_sampler.py --no-amp        # disable amplifier control
 
 ### Via Web Interface
 
-Open `http://<orangepi-ip>:3000` in a browser, select a key slot and upload a `.wav` or `.mp3` file.
+Open `http://<orangepi-ip>` in a browser, select a key slot and upload a `.wav` or `.mp3` file.
 
 ### Manually
 

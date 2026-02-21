@@ -362,7 +362,7 @@ class OledDisplay:
         except TypeError:
             return ImageFont.load_default()
 
-    def __init__(self, bus=2, address=0x3C, web_port=3000):
+    def __init__(self, bus=2, address=0x3C, web_port=80):
         serial = i2c(port=bus, address=address)
         self.device = ssd1306(serial)
 
@@ -444,7 +444,7 @@ class OledDisplay:
         self._draw_title(draw)
 
         # Blue zone: IP (regular) + status (bold), vertically centered
-        ip_line = f"{self._ip}:{self._web_port}"
+        ip_line = self._ip if self._web_port == 80 else f"{self._ip}:{self._web_port}"
         self._center_text(draw, self.BLUE_Y + 8, ip_line)
         self._center_text(draw, self.BLUE_Y + 28, self._status, font=self.font_bold)
 
