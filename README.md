@@ -148,7 +148,7 @@ Press **Ctrl+C** to stop everything.
 ### 10. Install the systemd service
 
 ```bash
-sudo cp /usr/src/carlbox-sampler/carlbox-sampler.service /etc/systemd/system/
+sudo ln -sf /usr/src/carlbox-sampler/carlbox-sampler.service /etc/systemd/system/carlbox-sampler.service
 sudo systemctl daemon-reload
 sudo systemctl enable carlbox-sampler
 sudo systemctl start carlbox-sampler
@@ -176,10 +176,9 @@ sudo git pull
 sudo systemctl restart carlbox-sampler
 ```
 
-If the service file changed, reload systemd first:
+If the service file changed, reload systemd:
 
 ```bash
-sudo cp /usr/src/carlbox-sampler/carlbox-sampler.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl restart carlbox-sampler
 ```
