@@ -376,15 +376,17 @@ class OledDisplay:
 
     @staticmethod
     def _get_ip():
-        """Get the local IP address."""
+        """Get a real (non-loopback) IP address, or None if unavailable."""
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
             ip = s.getsockname()[0]
             s.close()
-            return ip
+            if ip and not ip.startswith("127."):
+                return ip
         except Exception:
-            return "127.0.0.1"
+            pass
+        return None
 
     def _draw_title(self, draw):
         """Draw 'CarlBox v2' centered in the yellow zone (top 16px)."""
@@ -444,7 +446,10 @@ class OledDisplay:
         self._draw_title(draw)
 
         # Blue zone: IP (regular) + status (bold), vertically centered
-        ip_line = self._ip if self._web_port == 80 else f"{self._ip}:{self._web_port}"
+        if self._ip:
+            ip_line = self._ip if self._web_port == 80 else f"{self._ip}:{self._web_port}"
+        else:
+            ip_line = "No IP address !"
         self._center_text(draw, self.BLUE_Y + 8, ip_line)
         self._center_text(draw, self.BLUE_Y + 28, self._status, font=self.font_bold)
 
