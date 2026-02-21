@@ -5,7 +5,7 @@ A MIDI-controlled audio sampler built on an Orange Pi Zero3, with a web interfac
 ## Features
 
 - MIDI input: trigger audio samples from a MIDI controller
-- Web interface: upload and manage samples via browser
+- Web interface: upload and manage samples via browser (port 80)
 - Hot-reloading: detects new sample files automatically
 - OLED display: shows IP address, loading progress, and playback status
 - Amplifier control: GPIO-controlled PAM8302A with spike-free startup
@@ -90,7 +90,7 @@ reboot
 After reboot, verify the I2C bus and OLED display:
 
 ```bash
-apt install i2c-tools
+sudo apt install -y i2c-tools
 i2cdetect -y 2
 ```
 
@@ -100,13 +100,7 @@ You should see `3c` in the output grid.
 
 ```bash
 sudo apt update
-sudo apt install -y python3 python3-venv git i2c-tools fonts-dejavu-core
-```
-
-Node.js (for the web upload interface):
-
-```bash
-sudo apt install -y nodejs npm
+sudo apt install -y python3 python3-venv git i2c-tools fonts-dejavu-core nodejs npm
 ```
 
 ### 6. Clone the project
@@ -127,6 +121,8 @@ sudo venv/bin/pip install pygame mido luma.oled
 
 ### 8. Install Node.js dependencies (web interface)
 
+The web interface uses Express and Multer (defined in `piano-upload/package.json`):
+
 ```bash
 cd /usr/src/carlbox-sampler/piano-upload
 sudo npm install
@@ -136,15 +132,18 @@ sudo npm install
 
 ```bash
 cd /usr/src/carlbox-sampler
-sudo venv/bin/python midi_sampler.py
+sudo venv/bin/python run.py
 ```
 
 You should see:
+- Web server starting on port 80
 - OLED splash screen ("CarlBox v2") with progress bar
 - Audio and MIDI initialization
 - "READY - Waiting for MIDI input"
 
-Press **Ctrl+C** to stop.
+Open `http://<orangepi-ip>` in a browser to access the upload interface.
+
+Press **Ctrl+C** to stop everything.
 
 ### 10. Install the systemd service
 
@@ -155,7 +154,7 @@ sudo systemctl enable carlbox-sampler
 sudo systemctl start carlbox-sampler
 ```
 
-The sampler now starts automatically on every boot.
+The service starts both the web interface and MIDI sampler automatically on every boot.
 
 ### Service management
 
@@ -177,6 +176,14 @@ sudo git pull
 sudo systemctl restart carlbox-sampler
 ```
 
+If the service file changed, reload systemd first:
+
+```bash
+sudo cp /usr/src/carlbox-sampler/carlbox-sampler.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart carlbox-sampler
+```
+
 ## OLED Display
 
 The 0.96" dual-color OLED (yellow top 16px, blue bottom 48px) shows:
@@ -187,7 +194,7 @@ The 0.96" dual-color OLED (yellow top 16px, blue bottom 48px) shows:
 
 **During operation:**
 - Yellow: "CarlBox v2"
-- Blue: IP address + web UI port, current status (Ready / Playing KeyX)
+- Blue: IP address (or "No IP address !"), current status (Ready / Playing KeyX)
 
 ### OLED CLI options
 
@@ -204,6 +211,12 @@ The PAM8302A amplifier is controlled via GPIO PC9 (pin 73). The SD (shutdown) pi
 python midi_sampler.py --amp-pin 73    # specify GPIO pin (default)
 python midi_sampler.py --no-amp        # disable amplifier control
 ```
+
+## Web Interface
+
+The web UI runs on port 80, started by `run.py` alongside the MIDI sampler. It allows uploading and deleting audio samples from any browser on the same network.
+
+Open `http://<orangepi-ip>` in a browser, select a key slot and upload a `.wav` or `.mp3` file. The sampler detects new files automatically every 2 seconds.
 
 ## MIDI Key Mapping
 
@@ -222,16 +235,6 @@ python midi_sampler.py --no-amp        # disable amplifier control
 | `Key11` | 60 | Play |
 | `Key12` | 61 | Play |
 
-## Adding Samples
-
-### Via Web Interface
-
-Open `http://<orangepi-ip>` in a browser, select a key slot and upload a `.wav` or `.mp3` file.
-
-### Manually
-
-Place audio files in `piano-upload/uploads/KeyX/` folders. The sampler detects new files automatically every 2 seconds.
-
 ## Project Structure
 
 ```
@@ -239,13 +242,13 @@ carlbox-sampler/
 ├── midi_sampler.py            # Main MIDI sampler with OLED + amp control
 ├── reset_midi.py              # MIDI device reset utility
 ├── run.py                     # Unified launcher (web server + sampler)
-├── carlbox-sampler.service    # systemd service file
+├── carlbox-sampler.service    # systemd service (runs run.py)
 ├── .gitignore
 ├── README.md
 ├── docs/plans/                # Design documents
 └── piano-upload/
-    ├── server.js              # Node.js web upload server
-    ├── package.json
+    ├── server.js              # Node.js web upload server (port 80)
+    ├── package.json           # Node.js dependencies (express, multer)
     ├── public/                # Web interface static files
     └── uploads/               # Sample storage
         ├── Key1/              # STOP key (no audio file needed)
@@ -276,11 +279,19 @@ carlbox-sampler/
 2. Test audio: `aplay -D hw:0,0 /usr/share/sounds/alsa/Front_Center.wav`
 3. Check amplifier wiring and GPIO: `cat /sys/class/gpio/gpio73/value` (should be `1` when running)
 
+### Web interface not accessible
+
+1. Check the service is running: `sudo systemctl status carlbox-sampler`
+2. Check logs: `sudo journalctl -u carlbox-sampler -n 20`
+3. Verify Node.js dependencies: `ls /usr/src/carlbox-sampler/piano-upload/node_modules/`
+   - If missing: `cd /usr/src/carlbox-sampler/piano-upload && sudo npm install`
+4. Verify port 80 is not used by another service: `sudo ss -tlnp | grep :80`
+
 ### Service won't start
 
 ```bash
-sudo journalctl -u carlbox-sampler -n 50    # check recent logs
-sudo systemctl status carlbox-sampler        # check status
+sudo journalctl -u carlbox-sampler -n 50
+sudo systemctl status carlbox-sampler
 ```
 
 ---

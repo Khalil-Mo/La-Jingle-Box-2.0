@@ -1,11 +1,11 @@
 [Unit]
-Description=CarlBox MIDI Sampler
+Description=CarlBox Sampler + Web UI
 After=network.target sound.target
 
 [Service]
 Type=simple
 WorkingDirectory=/usr/src/carlbox-sampler
-ExecStart=/usr/src/carlbox-sampler/venv/bin/python midi_sampler.py
+ExecStart=/usr/src/carlbox-sampler/venv/bin/python run.py
 Restart=on-failure
 RestartSec=3
 StandardOutput=journal
