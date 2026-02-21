@@ -56,7 +56,7 @@ amp_pin = None  # GPIO pin number for amplifier enable (None = disabled)
 # --- Constants ---
 SUPPORTED_EXTENSIONS = ('.wav', '.mp3')
 DEFAULT_FREQUENCY = 44100
-DEFAULT_BUFFER_SIZE = 512
+DEFAULT_BUFFER_SIZE = 2048
 
 # Mapping from Folder Name to MIDI Note
 # Key1 -> 50, Key2 -> 51, etc.
