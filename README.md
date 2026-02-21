@@ -1,134 +1,288 @@
-# La Jingle Box 2.0
+# CarlBox v2
 
-A MIDI-controlled audio sampler with a web interface for managing samples.
+A MIDI-controlled audio sampler built on an Orange Pi Zero3, with a web interface for managing samples and a 0.96" OLED status display.
 
 ## Features
 
-- 🎹 **MIDI Input**: Trigger audio samples from your MIDI controller
-- 🌐 **Web Interface**: Upload and manage samples via browser
-- 🔄 **Hot-Reloading**: Detects new sample files automatically
-- 💾 **Supports**: WAV and MP3 audio formats
+- MIDI input: trigger audio samples from a MIDI controller
+- Web interface: upload and manage samples via browser
+- Hot-reloading: detects new sample files automatically
+- OLED display: shows IP address, loading progress, and playback status
+- Amplifier control: GPIO-controlled PAM8302A with spike-free startup
+- Auto-start: runs as a systemd service on boot
+- Supports WAV and MP3 audio formats
 
-## Requirements
+## Hardware
+
+| Component | Model | Connection |
+|-----------|-------|------------|
+| Board | Orange Pi Zero3 (2GB) | - |
+| OLED Display | 0.96" SSD1306 128x64 (yellow+blue) | I2C bus 2, addr 0x3C |
+| Amplifier | PAM8302A | SD pin on GPIO PC9 (pin 73) |
+| MIDI Controller | Any USB MIDI keyboard | USB |
+| Audio Output | 3.5mm jack via onboard codec | card 0: audiocodec |
+
+### Wiring
+
+**OLED Display (I2C):**
+| OLED Pin | Orange Pi Pin |
+|----------|---------------|
+| VCC | 3.3V |
+| GND | GND |
+| SDA | I2C3-SDA (PH5) |
+| SCL | I2C3-SCL (PH4) |
+
+**PAM8302A Amplifier:**
+| PAM8302A Pin | Connection |
+|--------------|------------|
+| VIN | 5V |
+| GND | GND |
+| SD (enable) | GPIO PC9 (pin 73) |
+| A+ | 3.5mm audio left/right |
+| A- | 3.5mm audio ground |
+
+## Full Setup Guide (Armbian)
+
+### 1. Flash Armbian
+
+Download Armbian for Orange Pi Zero3 from [armbian.com](https://www.armbian.com/orangepi-zero3/) and flash it to a microSD card using [balenaEtcher](https://etcher.balena.io/) or `dd`.
+
+### 2. First boot: connect via Ethernet
+
+Plug an Ethernet cable between the Orange Pi and your router. Power on the board, wait ~1 minute, then find its IP address from your router's admin page (look for `orangepi` or `carlboxv2`).
+
+Connect via SSH:
 
 ```bash
-# Python
-pip install pygame mido
-
-# Node.js (for web interface)
-cd piano-upload && npm install
+ssh root@<ip-address>
 ```
 
-### Optional: OLED Display
+Default root password is set on first boot. Follow the prompts to create a regular user account (e.g. `carlbox`).
 
-For I2C OLED display support (SSD1306, 128x64):
+### 3. Set up WiFi
+
+Run the Armbian configuration tool:
 
 ```bash
-pip install luma.oled
+armbian-config
 ```
 
-### OLED CLI Options
+Navigate to **Network > WiFi**, select your network and enter the password. This creates a netplan config in `/etc/netplan/` using `systemd-networkd`.
+
+Once WiFi is connected, you can disconnect the Ethernet cable. Find the new WiFi IP:
 
 ```bash
-python midi_sampler.py --i2c-bus 2 --i2c-addr 0x3C   # specify bus/address
+ip addr show wlan0 | grep "inet "
+```
+
+Reconnect via SSH on the WiFi IP.
+
+### 4. Enable I2C overlay
+
+Run `armbian-config`, go to **System > Hardware** and enable the `i2c3-ph` overlay. This adds I2C bus 2 on pins PH4/PH5.
+
+Reboot:
+
+```bash
+reboot
+```
+
+After reboot, verify the I2C bus and OLED display:
+
+```bash
+apt install i2c-tools
+i2cdetect -y 2
+```
+
+You should see `3c` in the output grid.
+
+### 5. Install system dependencies
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv git i2c-tools fonts-dejavu-core
+```
+
+Node.js (for the web upload interface):
+
+```bash
+sudo apt install -y nodejs npm
+```
+
+### 6. Clone the project
+
+```bash
+sudo git clone https://github.com/Khalil-Mo/La-Jingle-Box-2.0.git /usr/src/carlbox-sampler
+cd /usr/src/carlbox-sampler
+sudo git checkout feat/oled-display
+```
+
+### 7. Set up Python virtual environment
+
+```bash
+cd /usr/src/carlbox-sampler
+sudo python3 -m venv venv
+sudo venv/bin/pip install pygame mido luma.oled
+```
+
+### 8. Install Node.js dependencies (web interface)
+
+```bash
+cd /usr/src/carlbox-sampler/piano-upload
+sudo npm install
+```
+
+### 9. Test manually
+
+```bash
+cd /usr/src/carlbox-sampler
+sudo venv/bin/python midi_sampler.py
+```
+
+You should see:
+- OLED splash screen ("CarlBox v2") with progress bar
+- Audio and MIDI initialization
+- "READY - Waiting for MIDI input"
+
+Press **Ctrl+C** to stop.
+
+### 10. Install the systemd service
+
+```bash
+sudo cp /usr/src/carlbox-sampler/carlbox-sampler.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable carlbox-sampler
+sudo systemctl start carlbox-sampler
+```
+
+The sampler now starts automatically on every boot.
+
+### Service management
+
+```bash
+sudo systemctl status carlbox-sampler    # check status
+sudo journalctl -u carlbox-sampler -f    # follow live logs
+sudo systemctl restart carlbox-sampler   # restart
+sudo systemctl stop carlbox-sampler      # stop
+sudo systemctl disable carlbox-sampler   # disable auto-start
+```
+
+### 11. Updating
+
+To pull the latest code and restart:
+
+```bash
+cd /usr/src/carlbox-sampler
+sudo git pull
+sudo systemctl restart carlbox-sampler
+```
+
+## OLED Display
+
+The 0.96" dual-color OLED (yellow top 16px, blue bottom 48px) shows:
+
+**During startup:**
+- Yellow: "CarlBox v2"
+- Blue: progress bar with step labels (Init audio, Init MIDI, Loading 3/5...)
+
+**During operation:**
+- Yellow: "CarlBox v2"
+- Blue: IP address + web UI port, current status (Ready / Playing KeyX)
+
+### OLED CLI options
+
+```bash
+python midi_sampler.py --i2c-bus 2 --i2c-addr 0x3C   # specify bus/address (defaults)
 python midi_sampler.py --no-oled                       # disable OLED
 ```
 
-## Quick Start
+## Amplifier GPIO Control
+
+The PAM8302A amplifier is controlled via GPIO PC9 (pin 73). The SD (shutdown) pin is held LOW during audio initialization to prevent speaker pops, then set HIGH once the audio subsystem is ready.
 
 ```bash
-python run.py
+python midi_sampler.py --amp-pin 73    # specify GPIO pin (default)
+python midi_sampler.py --no-amp        # disable amplifier control
 ```
-
-This will:
-1. Start the web interface server
-2. Open your browser to http://localhost:3000
-3. Start the MIDI sampler
-
-Press **Ctrl+C** to stop everything.
 
 ## MIDI Key Mapping
 
-| Folder   | MIDI Note | Function   |
-|----------|-----------|------------|
-| `Key1`   | 50        | **STOP**   |
-| `Key2`   | 51        | Play       |
-| `Key3`   | 52        | Play       |
-| `Key4`   | 53        | Play       |
-| `Key5`   | 54        | Play       |
-| `Key6`   | 55        | Play       |
-| `Key7`   | 56        | Play       |
-| `Key8`   | 57        | Play       |
-| `Key9`   | 58        | Play       |
-| `Key10`  | 59        | Play       |
-| `Key11`  | 60        | Play       |
-| `Key12`  | 61        | Play       |
-
-## Folder Structure
-
-```
-La-Jingle-Box-2.0/
-├── midi_sampler.py       # Main MIDI sampler script
-├── reset_midi.py         # MIDI device reset utility
-├── sounds/               # Additional sound files
-└── piano-upload/
-    ├── server.js         # Web upload server
-    ├── public/           # Web interface files
-    └── uploads/          # Sample storage
-        ├── Key1/         # Audio files for MIDI note 50
-        ├── Key2/         # Audio files for MIDI note 51
-        └── ...           # etc.
-```
+| Folder | MIDI Note | Function |
+|--------|-----------|----------|
+| `Key1` | 50 | **STOP** |
+| `Key2` | 51 | Play |
+| `Key3` | 52 | Play |
+| `Key4` | 53 | Play |
+| `Key5` | 54 | Play |
+| `Key6` | 55 | Play |
+| `Key7` | 56 | Play |
+| `Key8` | 57 | Play |
+| `Key9` | 58 | Play |
+| `Key10` | 59 | Play |
+| `Key11` | 60 | Play |
+| `Key12` | 61 | Play |
 
 ## Adding Samples
 
 ### Via Web Interface
-1. Start the web server: `node piano-upload/server.js`
-2. Go to http://localhost:3000
-3. Select a key and upload your audio file (.wav or .mp3)
+
+Open `http://<orangepi-ip>:3000` in a browser, select a key slot and upload a `.wav` or `.mp3` file.
 
 ### Manually
-Place audio files directly in the corresponding `piano-upload/uploads/KeyX/` folder. The sampler will detect new files automatically.
+
+Place audio files in `piano-upload/uploads/KeyX/` folders. The sampler detects new files automatically every 2 seconds.
+
+## Project Structure
+
+```
+carlbox-sampler/
+├── midi_sampler.py            # Main MIDI sampler with OLED + amp control
+├── reset_midi.py              # MIDI device reset utility
+├── run.py                     # Unified launcher (web server + sampler)
+├── carlbox-sampler.service    # systemd service file
+├── .gitignore
+├── README.md
+├── docs/plans/                # Design documents
+└── piano-upload/
+    ├── server.js              # Node.js web upload server
+    ├── package.json
+    ├── public/                # Web interface static files
+    └── uploads/               # Sample storage
+        ├── Key1/              # STOP key (no audio file needed)
+        ├── Key2/              # Audio files for MIDI note 51
+        └── ...
+```
 
 ## Troubleshooting
 
-### MIDI Device Not Found or Locked
+### MIDI device not found
 
-If you see "No MIDI device available" or the device shows as locked:
+1. Check the device is connected: `aconnect -l`
+2. Close any other app using MIDI
+3. Run: `sudo venv/bin/python reset_midi.py`
+4. Unplug and replug the MIDI controller
 
-1. **Close other applications** using MIDI (DAWs, MIDI monitors, etc.)
-2. **Run the reset utility**:
-   ```bash
-   python reset_midi.py
-   ```
-3. **Unplug and replug** your MIDI device
-4. **Restart your computer** if issues persist
+### OLED display not detected
 
-### Custom Sample Directory
+1. Verify I2C overlay is enabled: `cat /boot/armbianEnv.txt | grep overlays`
+   - Should contain `i2c3-ph`
+2. Check the display is visible: `sudo i2cdetect -y 2`
+   - Should show `3c` in the grid
+3. Check wiring (SDA/SCL not swapped, VCC is 3.3V)
 
-You can specify a custom sample directory:
+### No audio output
+
+1. Check sound card: `aplay -l`
+2. Test audio: `aplay -D hw:0,0 /usr/share/sounds/alsa/Front_Center.wav`
+3. Check amplifier wiring and GPIO: `cat /sys/class/gpio/gpio73/value` (should be `1` when running)
+
+### Service won't start
+
 ```bash
-python midi_sampler.py --dir "C:/path/to/your/samples"
+sudo journalctl -u carlbox-sampler -n 50    # check recent logs
+sudo systemctl status carlbox-sampler        # check status
 ```
-
-## Building an Executable
-
-To create a standalone `.exe` file:
-
-```bash
-pyinstaller --onefile --add-data "C:/Users/momoc/AppData/Local/Programs/Python/Python313/Lib/site-packages/pygame;pygame" --hidden-import=mido --hidden-import=pygame --hidden-import=mido.backends.pygame midi_sampler.py
-```
-
-> **Note**: Adjust the pygame path to match your Python installation.
-
-The executable will be created in the `dist/` folder.
-
-## Controls
-
-- **Ctrl+C**: Quit the sampler cleanly
-- **Key1 (MIDI 50)**: Stop current playback
-- **Key2-Key12 (MIDI 51-61)**: Play assigned samples
 
 ---
 
-Made with ♪ for live performances and jingle playback.
+Built for live performances and jingle playback.
