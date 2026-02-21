@@ -10,7 +10,6 @@ import sys
 import time
 import signal
 import subprocess
-import webbrowser
 
 # --- Configuration ---
 WEB_SERVER_PORT = 80
@@ -68,13 +67,6 @@ def start_web_server():
         return False
 
 
-def open_browser():
-    """Open the web interface in the default browser."""
-    url = f"http://localhost:{WEB_SERVER_PORT}"
-    print(f"[BROWSER] Opening {url}")
-    webbrowser.open(url)
-
-
 def cleanup():
     """Stop the web server process."""
     global web_server_process
@@ -94,31 +86,20 @@ def cleanup():
         web_server_process = None
 
 
-def run_midi_sampler():
-    """Run the MIDI sampler (imports and runs main)."""
-    # Import here to avoid loading pygame until needed
-    from midi_sampler import main
-    main()
-
-
 def main():
     """Main entry point."""
     print("=" * 50)
     print("     LA JINGLE BOX 2.0 - Unified Launcher")
     print("=" * 50)
-    
+
     try:
-        # 1. Start web server
-        if not start_web_server():
-            print("\n[WARN] Continuing without web server...")
-        else:
-            # 2. Open browser
-            open_browser()
-        
-        # 3. Run MIDI sampler (blocks until Ctrl+C)
-        print("\n[MIDI] Starting MIDI sampler...\n")
-        run_midi_sampler()
-        
+        # Import here to avoid loading pygame until needed
+        from midi_sampler import main as sampler_main
+
+        # Run MIDI sampler, passing web server start as a hook
+        # so it appears in the OLED loading progress bar
+        sampler_main(pre_load_hook=start_web_server)
+
     except KeyboardInterrupt:
         print("\n[EXIT] Shutting down...")
     finally:

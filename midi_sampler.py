@@ -617,8 +617,13 @@ def handle_midi_message(msg, loader, oled=None):
             print(f"[SKIP] Note {midi_note} - not mapped")
 
 
-def main():
-    """Main function to run the MIDI sampler."""
+def main(pre_load_hook=None):
+    """Main function to run the MIDI sampler.
+
+    Args:
+        pre_load_hook: Optional callable to run before loading samples
+                       (e.g. starting the web server from run.py).
+    """
     global midi_port, amp_pin
 
     # Setup signal handlers FIRST
@@ -659,7 +664,7 @@ def main():
 
         # 2. Setup amplifier GPIO (keep disabled during audio init)
         if oled:
-            oled.show_progress("Init hardware...", 5)
+            oled.show_progress("Init hardware...", 4)
         if not args.no_amp:
             try:
                 gpio_export(args.amp_pin)
@@ -685,7 +690,7 @@ def main():
 
         # 4. Initialize MIDI
         if oled:
-            oled.show_progress("Init MIDI...", 12)
+            oled.show_progress("Init MIDI...", 11)
         midi_port = initialize_midi()
 
         if midi_port is None:
@@ -700,15 +705,21 @@ def main():
             cleanup_resources()
             sys.exit(1)
 
-        # 5. Load Samples (15% to 100% of progress bar)
+        # 5. Run pre-load hook (e.g. start web server)
+        if pre_load_hook:
+            if oled:
+                oled.show_progress("Starting web UI...", 15)
+            pre_load_hook()
+
+        # 6. Load Samples (20% to 100% of progress bar)
         if oled:
-            oled.show_progress("Loading samples...", 15)
+            oled.show_progress("Loading samples...", 20)
         folder_path = get_sample_folder_path(args.dir)
         loader = SampleLoader(folder_path)
 
         def _on_sample_progress(loaded, total):
             if oled:
-                pct = 15 + int(85 * loaded / total)
+                pct = 20 + int(80 * loaded / total)
                 oled.show_progress(f"Loading {loaded}/{total}", pct)
 
         loader.scan_and_update(on_progress=_on_sample_progress)
