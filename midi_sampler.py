@@ -708,7 +708,7 @@ def main(pre_load_hook=None):
         # 5. Run pre-load hook (e.g. start web server)
         if pre_load_hook:
             if oled:
-                oled.show_progress("Starting web UI...", 15)
+                oled.show_progress("Init Web UI...", 15)
             pre_load_hook()
 
         # 6. Load Samples (20% to 100% of progress bar)
